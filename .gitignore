@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-electron/
+release/
+*.exe
+*.exe~
+*.db
+.env
+.DS_Store
+package-lock.json

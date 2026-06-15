@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentTest - 正在准备</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: white;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+  }
+  .container {
+    text-align: center;
+    max-width: 520px;
+    padding: 40px;
+  }
+  .logo { font-size: 48px; margin-bottom: 16px; }
+  h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+  .subtitle { color: #8899aa; font-size: 14px; margin-bottom: 32px; }
+  .progress-track {
+    width: 100%;
+    height: 6px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+  .status { font-size: 14px; color: #ccd; min-height: 24px; margin-bottom: 8px; }
+  .log {
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 12px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    color: #8899aa;
+    height: 160px;
+    overflow-y: auto;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .log .info { color: #8899aa; }
+  .log .download { color: #4facfe; }
+  .log .success { color: #00d68f; }
+  .log .error { color: #ff6b6b; }
+  .hint { margin-top: 16px; font-size: 12px; color: #667; display: none; }
+  .hint.show { display: block; }
+  .pulse { animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="logo pulse">🤖</div>
+  <h1>AgentTest</h1>
+  <p class="subtitle">正在准备运行环境</p>
+  <div class="progress-track">
+    <div class="progress-bar" id="progressBar"></div>
+  </div>
+  <div class="status" id="statusText">正在检查浏览器...</div>
+  <div class="log" id="logArea"><span class="info">⏳ 正在检查 Playwright Chromium 浏览器...</span></div>
+  <p class="hint" id="hint">首次启动需要下载 ~130MB 浏览器文件，请耐心等待</p>
+</div>
+<script>
+  const { ipcRenderer } = require('electron')
+  const progressBar = document.getElementById('progressBar')
+  const statusText = document.getElementById('statusText')
+  const logArea = document.getElementById('logArea')
+  const hint = document.getElementById('hint')
+
+  let progress = 0
+  let downloadStarted = false
+
+  ipcRenderer.on('install:progress', (_event, msg) => {
+    const line = document.createElement('div')
+    line.className = 'info'
+
+    if (msg.includes('正在下载') || msg.includes('Downloading')) {
+      line.className = 'download'
+      downloadStarted = true
+      hint.classList.add('show')
+      // 模拟进度，实际进度不可精确获取
+      if (progress < 90) progress += Math.random() * 8
+    } else if (msg.includes('解压') || msg.includes('extract')) {
+      if (progress < 95) progress = 95
+    } else if (msg.includes('完成') || msg.includes('success')) {
+      progress = 100
+      line.className = 'success'
+    } else if (msg.includes('失败') || msg.includes('error')) {
+      line.className = 'error'
+    } else {
+      line.className = 'info'
+    }
+
+    line.textContent = msg
+    logArea.appendChild(line)
+    logArea.scrollTop = logArea.scrollHeight
+    progressBar.style.width = Math.min(progress, 100) + '%'
+    statusText.textContent = msg
+  })
+
+  ipcRenderer.on('install:done', () => {
+    progress = 100
+    progressBar.style.width = '100%'
+    statusText.textContent = '✅ 准备就绪！'
+    const line = document.createElement('div')
+    line.className = 'success'
+    line.textContent = '✅ 浏览器已就绪，即将启动...'
+    logArea.appendChild(line)
+    logArea.scrollTop = logArea.scrollHeight
+    // 窗口将在 1 秒后被主进程关闭
+  })
+
+  ipcRenderer.on('install:error', (_event, errMsg) => {
+    const line = document.createElement('div')
+    line.className = 'error'
+    line.textContent = '❌ ' + errMsg
+    logArea.appendChild(line)
+    logArea.scrollTop = logArea.scrollHeight
+    statusText.textContent = '❌ 安装失败'
+  })
+</script>
+</body>
+</html>
