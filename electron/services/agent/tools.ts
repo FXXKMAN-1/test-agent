@@ -28,12 +28,17 @@ export function createPlaywrightTools(page: Page) {
 
     tool(
       async ({ selector }) => {
-        await page.click(selector, { timeout: 10000 })
-        return JSON.stringify({ success: true })
+        const el = page.locator(selector).first()
+        const tag = await el.evaluate(el => el.tagName).catch(() => '?')
+        await el.click({ timeout: 10000 })
+        // 点击后等待页面稳定
+        await page.waitForLoadState('networkidle').catch(() => {})
+        await page.waitForTimeout(300)
+        return JSON.stringify({ success: true, clicked: tag })
       },
       {
         name: 'click_selector',
-        description: '通过 CSS 选择器点击页面元素',
+        description: '通过 CSS 选择器点击页面元素。点击后自动等待页面稳定',
         schema: z.object({
           selector: z.string().describe('CSS 选择器，如 #submit-btn, .search-button, button[type="submit"]'),
         }),
@@ -42,14 +47,62 @@ export function createPlaywrightTools(page: Page) {
 
     tool(
       async ({ text }) => {
-        await page.getByText(text, { exact: false }).first().click({ timeout: 10000 })
-        return JSON.stringify({ success: true, clickedText: text })
+        // 优先在可交互元素中查找文本，避免点到导航栏/页脚的非按钮文本
+        const result = await page.evaluate((targetText: string) => {
+          // 优先级：button > a > input[submit] > [role=button] > 其他可点击元素
+          const selectors = [
+            'button', 'a', 'input[type="submit"]', 'input[type="button"]',
+            '[role="button"]', '[onclick]', '.btn', '[class*="btn"]',
+          ]
+          for (const sel of selectors) {
+            const els = Array.from(document.querySelectorAll(sel))
+            const match = els.find(el => el.textContent?.trim() === targetText || el.textContent?.includes(targetText))
+            if (match) {
+              (match as HTMLElement).click()
+              return { success: true, clicked: match.tagName + (match.className ? '.' + String(match.className).split(' ')[0] : ''), text: targetText }
+            }
+          }
+          // 回退：用文本节点找最近的交互父元素
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+          let node
+          while ((node = walker.nextNode())) {
+            if (node.textContent?.trim() === targetText) {
+              let parent: Element | null = node.parentElement
+              while (parent && parent.tagName !== 'BODY') {
+                if (['BUTTON','A','INPUT','LABEL'].includes(parent.tagName)) {
+                  (parent as HTMLElement).click()
+                  return { success: true, clicked: parent.tagName, text: targetText }
+                }
+                parent = parent.parentElement
+              }
+            }
+          }
+          return { success: false, text: targetText }
+        }, text)
+
+        if (!result.success) {
+          // 最后回退：用 Playwright 原生 getByText
+          try {
+            const locator = page.getByText(text, { exact: true }).first()
+            // 限定只能在按钮/链接内找
+            const btn = locator.locator('..').filter({ has: page.locator(`text="${text}"`) }).first()
+            await btn.click({ timeout: 5000 })
+            return JSON.stringify({ success: true, clickedText: text, method: 'fallback' })
+          } catch {
+            return JSON.stringify({ success: false, error: `未找到包含"${text}"的可点击元素`, hint: '尝试用 click_selector 或先调用 get_page_info 查看页面结构' })
+          }
+        }
+
+        // 点击后等待页面稳定
+        await page.waitForLoadState('networkidle').catch(() => {})
+        await page.waitForTimeout(500)
+        return JSON.stringify(result)
       },
       {
         name: 'click_text',
-        description: '点击包含指定文本的页面元素',
+        description: '点击页面上包含指定文本的可交互元素（按钮、链接、提交按钮）。会优先在按钮/链接上查找，不会误点导航栏的纯文字。点击后自动等待页面稳定',
         schema: z.object({
-          text: z.string().describe('元素包含的文本内容，如 "登录", "搜索", "确定"'),
+          text: z.string().describe('要点击的按钮或链接上的文字，如"登录""搜索""保存""确定"'),
         }),
       }
     ),
