@@ -9,3 +9,7 @@ release/
 .DS_Store
 package-lock.json
 .claude/plans/myagents/
+upload-release.js
+release-new/
+release-nsis/
+release2/

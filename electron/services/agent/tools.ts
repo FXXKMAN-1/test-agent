@@ -116,10 +116,33 @@ export function createPlaywrightTools(page: Page) {
 
     tool(
       async ({ text, value }) => {
-        await page.getByPlaceholder(text).first().fill(value, { timeout: 10000 })
-        return JSON.stringify({ success: true })
+        // 先在页面上搜索所有可见 input，做模糊 placeholder 匹配
+        const matched = await page.evaluate(({ search, val }: { search: string; val: string }) => {
+          const inputs = Array.from(document.querySelectorAll('input:not([type=hidden]), textarea'))
+          for (const input of inputs) {
+            const ph = ((input as HTMLInputElement).placeholder || '').trim()
+            // 精确匹配 → 包含匹配 → 逐字匹配
+            if (ph === search || ph.includes(search) || search.includes(ph)) {
+              ;(input as HTMLInputElement).value = val
+              input.dispatchEvent(new Event('input', { bubbles: true }))
+              input.dispatchEvent(new Event('change', { bubbles: true }))
+              return { success: true, placeholder: ph, method: 'fuzzy' }
+            }
+          }
+          return { success: false, searched: search }
+        }, { search: text, val: value })
+
+        if (matched.success) return JSON.stringify(matched)
+
+        // 回退：Playwright 原生（精确匹配）
+        try {
+          await page.getByPlaceholder(text).first().fill(value, { timeout: 5000 })
+          return JSON.stringify({ success: true, method: 'exact' })
+        } catch {
+          return JSON.stringify({ success: false, error: `未找到 placeholder 为"${text}"的输入框`, hint: '用 fill_by_label 代替，或先 get_page_info 查看页面' })
+        }
       },
-      { name: 'fill_by_placeholder', description: '通过 placeholder 找输入框填写', schema: z.object({ text: z.string().describe('placeholder 文字'), value: z.string().describe('值') }) }
+      { name: 'fill_by_placeholder', description: '通过 placeholder 文字（模糊匹配）找输入框填写。优先用 fill_by_label', schema: z.object({ text: z.string().describe('placeholder 大概文字'), value: z.string().describe('值') }) }
     ),
 
     tool(
